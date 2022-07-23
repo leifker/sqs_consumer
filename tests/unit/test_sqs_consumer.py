@@ -1,7 +1,6 @@
 import json
 import boto3
 import pytest
-from sqlalchemy import select
 from botocore.stub import Stubber
 from project.database_client import DatabaseClient
 from project.database_models import UserLogins
@@ -10,7 +9,7 @@ from project.sqs_consumer import SQSConsumer, SQSClient
 
 @pytest.fixture(scope="function")
 def mock_aws_client():
-    aws_client = boto3.client("sqs")
+    aws_client = boto3.client("sqs", region_name='us-east-1')
     stubber = Stubber(aws_client)
     stubber.add_response('receive_message',
                          {

@@ -88,11 +88,17 @@ find . -type d -name __pycache__ -delete
 
 ```
 
+### Docker Build
+
+To build a docker container run `make build`. Once built successfully we can ensure the requirements are
+met using localstack here as well, see below.
+
 ## Execution
 
 Running the application in a non-test/non-virtual environment.
 
 Requirements:
+* postgresql client library
 * python 3 (tested with 3.10)
 * AWS credentials
 
@@ -103,6 +109,7 @@ Requirements:
 export SQS_URL="http://localhost:4566/000000000000/login-queue"
 export PG_URL="postgresql://postgres:postgres@localhost:5432/postgres"
 
+export AWS_DEFAULT_REGION="us-east-1"
 export AWS_ACCESS_KEY_ID="test"
 export AWS_SECRET_ACCESS_KEY="test"
 export AWS_ENDPOINT_URL="http://localhost:4566"
@@ -118,7 +125,58 @@ $ awslocal sqs receive-message --queue-url http://localhost:4566/000000000000/lo
 $ 
 ```
 
-Note: By default the client will execute indefinitely.
+Note: By default the client will execute until empty queue.
+
+### Docker Execution
+
+Docker container execution with localstack test.
+
+Requirements:
+* docker
+* AWS credentials
+
+1. Run the localstack process
+```shell
+$ make start
+docker-compose up -d
+Starting data-engineering-take-home_localstack_1 ... done
+Starting data-engineering-take-home_postgres_1   ... done
+```
+2. Execute the dockerized application
+
+```shell
+docker run \
+  -e SQS_URL='http://localhost:4566/000000000000/login-queue' \
+  -e PG_URL='postgresql://postgres:postgres@localhost:5432/postgres' \
+  -e AWS_DEFAULT_REGION='us-east-1' \
+  -e AWS_ACCESS_KEY_ID='test' \
+  -e AWS_SECRET_ACCESS_KEY='test' \
+  -e AWS_ENDPOINT_URL='http://localhost:4566' \
+  --network="host" \
+  -it <image id>
+```
+
+3. Validate postgres records
+```shell
+ $ psql -d postgres -U postgres  -p 5432 -h 127.0.0.1 -W
+Password: 
+psql (14.2, server 10.21 (Debian 10.21-1.pgdg90+1))
+Type "help" for help.
+
+postgres=# select * from user_logins;
+               user_id                | device_type |                            masked_ip                             |                         masked_device_id                         | locale | app_version | create_date 
+--------------------------------------+-------------+------------------------------------------------------------------+------------------------------------------------------------------+--------+-------------+-------------
+ 424cdd21-063a-43a7-b91b-7ca1a833afae | android     | a6d0e2f27f6111e10b06790db42f34123e724aa0fd24b280f4a0ef5ee986784c | 4f00c1a807b673887c7af517d0df68e6b41aecf8cbec26c71fe4c580664669ed | RU     |           2 | 2022-07-23
+ c0173198-76a8-4e67-bfc2-74eaa3bbff57 | ios         | 7b03f7d723535706b4777384fc906d18a4376bb84cebb50dc22c6eb9bddf00cb | a857e702f98990716938a0d74c3dc2dc565e4448833e2cf91c6ab26fc0e9971f | PH     |           0 | 2022-07-23
+ 66e0635b-ce36-4ec7-aa9e-8a8fca9b83d4 | ios         | fa7fca28c658d75a751b60e262602e1b11f4149274af6ec0d8c82a8619a51437 | e84fb3e15175d0a2492de6c02a99595c1343db7321ad6bb5f62052edd00a84f8 |        |           2 | 2022-07-23
+ 181452ad-20c3-4e93-86ad-1934c9248903 | android     | b21d1c922d9e9d1b913ade3265baa7fc43c757976dcd7cac3ed2043176655396 | 94b571f680b8f41547047f24e385334265773d33ab643bfc6f1684e21b8b34d9 | ID     |           0 | 2022-07-23
+ 60b9441c-e39d-406f-bba0-c7ff0e0ee07f | android     | 587f5a111a1f2adb462f778574a91b93de3b29889deca6e25dd363588a5e0ccb | 3102ec6d1310b3db007305eaa5802b3831d4b4ae5f165e21ee1e3298f55e5616 | FR     |           0 | 2022-07-23
+ 5082b1ae-6523-4e3b-a1d8-9750b4407ee8 | android     | 8ff1dcf25f4b6b831000c6af50fe0ca5c03b8db525d3c8b955531d20e5904457 | 8d99f03f520c4faaf8cc1b0c2fcb88f9ece87e7984ca36bdb7feb98d53ba023d |        |           3 | 2022-07-23
+
+...
+
+postgres=# \q
+```
 
 ## Design Notes
 
@@ -167,6 +225,11 @@ consumer.run(limit=1)
 consumer.run(until_empty=True)
 ```
 
+### Multi-stage & Non-Root Docker
+
+The `Dockerfile` includes a multi-stage build to prevent build artifacts from being present in the final image
+and care is taken to ensure a non-root user is used for security.
+
 ## Future Work
 
 ### Database Schema
@@ -190,18 +253,27 @@ The `app_version` column is an integer while the messages contain string version
 solution was to insert the major version, however it might be useful to capture the complete
 and accurate application version.
 
-#### Unit Test Coverage
+### Metrics endpoint
+
+Include a [flask based endpoint](https://pypi.org/project/prometheus-flask-exporter/) for metrics collection by 
+[Prometheus](https://grafana.com/oss/prometheus/) & [Grafana](https://grafana.com/) or other monitoring solution 
+when running in kubernetes. Ideally, message rates, error rates, and latency metrics.
+
+### Unit Test Coverage
 
 Increase the unit test coverage.
 
-#### CLI options
+### CLI options
 
 Additional CLI options including help documentation and command line arguments using
 [argparse](https://docs.python.org/3/library/argparse.html). Things like the consumer
 run modes, log levels, and perhaps a queue peek function would be useful for debugging.
 
-
-#### Consumer Retry
+### Consumer Retry
 
 There are situations where a certain number of re-tries may be useful before failing.
 This project is written to fail fast without any re-try logic.
+
+### Docker Image Publishing
+
+The docker images need to be tagged and published to a repo. This is not included in the project.

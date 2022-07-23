@@ -17,19 +17,23 @@ $(VENV): requirements.txt requirements-dev.txt
 
 .PHONY: test
 test: $(VENV)
-	$(PY) -m pytest tests/unit/
+	$(BIN)/$(PY) -m pytest tests/unit/
 
 .PHONY: awslocal_test
 awslocal_test: $(VENV)
-	$(PY) -m pytest tests/awslocal/
+	$(BIN)/$(PY) -m pytest tests/awslocal/
 
 .PHONY: lint
 lint: $(VENV)
-	flake8 project
+	$(BIN)/flake8 project
 
 .PHONY: run
 run: $(VENV)
-	$(PY) project/app.py
+	$(BIN)/$(PY) project/app.py
+
+.PHONY: build
+build:
+	docker build .
 
 clean:
 	rm -rf $(VENV)
