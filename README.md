@@ -31,7 +31,7 @@ python3 -m pytest tests/unit/
 ===================== test session starts =====================
 platform linux -- Python 3.10.5, pytest-7.1.2, pluggy-1.0.0
 rootdir: /mnt/code/code/fetch/interview
-collected 4 items                                                                                                                                                                                                                   
+collected 4 items 
 
 tests/unit/test_database_client.py .                    [ 25%]
 tests/unit/test_database_models.py .                    [ 50%]
@@ -70,7 +70,7 @@ python3 -m pytest tests/awslocal/
 ===================== test session starts =====================
 platform linux -- Python 3.10.5, pytest-7.1.2, pluggy-1.0.0
 rootdir: /mnt/code/code/fetch/interview
-collected 1 item                                                                                                                                                                                                                    
+collected 1 item
 
 tests/awslocal/test_awslocal.py .                        [100%]
 
@@ -119,10 +119,6 @@ export AWS_ENDPOINT_URL="http://localhost:4566"
 ```shell
 $ make run
 python3 project/app.py
-$ echo $?
-0
-$ awslocal sqs receive-message --queue-url http://localhost:4566/000000000000/login-queue
-$ 
 ```
 
 Note: By default the client will execute until empty queue.
@@ -196,11 +192,66 @@ models for different object queues.
 
 SQLAlchemy has a number of backends besides the postgres backend used in this project.
 This allows for swapping the destination datastore, for example the unit tests swap
-the postgres engine for a sqlite in memory database to run tests.
+the postgres engine for a sqlite in-memory database to run unit tests.
 
 ```python
     engine = create_engine("sqlite://", echo=True, future=True)
     SQSConsumer(db_client=DatabaseClient(engine))
+```
+### Multi-Threading
+
+Moving data between SQS and postgres is largely constrained by network I/O latency which multi-threading is an excellent 
+approach to improve throughput assuming that out of order inserts is acceptable. The application is designed to operate 
+with a configurable number of threads. These can be set by environment variable `APP_THREAD_COUNT`.
+
+A test was completed increasing the number of test messages in the localstack environment from 100 to 1,000,000 messages
+using the script located at `scripts/bulk_loader.py`. The process was run with 16 threads vs 1 thread (default)
+for a rough comparison since latency is far less of a concern on localhost. The 70% improvement on localhost likely
+would be more significant when actual network latency is present.
+
+Test setup involves truncating the postgres table and validating the number of messages in the queue prior to the test.
+
+```shell
+$ awslocal sqs get-queue-attributes --queue-url http://localhost:4566/000000000000/login-queue --attribute-names All
+{
+    "Attributes": {
+        "ApproximateNumberOfMessages": "1000000",
+        "ApproximateNumberOfMessagesNotVisible": "0",
+        "ApproximateNumberOfMessagesDelayed": "0",
+        "CreatedTimestamp": "1658626537",
+        "DelaySeconds": "0",
+        "LastModifiedTimestamp": "1658626537",
+        "MaximumMessageSize": "262144",
+        "MessageRetentionPeriod": "345600",
+        "QueueArn": "arn:aws:sqs:us-east-1:000000000000:login-queue",
+        "ReceiveMessageWaitTimeSeconds": "0",
+        "VisibilityTimeout": "30"
+    }
+}
+```
+
+```shell
+$ time APP_THREAD_COUNT=16 make run
+python/venv/bin/python3 project/app.py
+
+real    8m58.209s
+user    7m16.711s
+sys     0m41.671s
+
+$ time APP_THREAD_COUNT=1 make run
+python/venv/bin/python3 project/app.py
+
+real    29m22.890s
+user    6m27.804s
+sys     0m24.781s
+```
+
+```shell
+postgres=# select count(*) from user_logins;
+  count  
+---------
+ 1000000
+(1 row)
 ```
 
 ### Consumer modes
@@ -228,7 +279,8 @@ consumer.run(until_empty=True)
 ### Multi-stage & Non-Root Docker
 
 The `Dockerfile` includes a multi-stage build to prevent build artifacts from being present in the final image
-and care is taken to ensure a non-root user is used for security.
+and care is taken to ensure a non-root user is used for security. Final image size is 210MB, switching to Alpine
+image may be able to improve this further.
 
 ## Future Work
 
@@ -253,12 +305,6 @@ The `app_version` column is an integer while the messages contain string version
 solution was to insert the major version, however it might be useful to capture the complete
 and accurate application version.
 
-### Metrics endpoint
-
-Include a [flask based endpoint](https://pypi.org/project/prometheus-flask-exporter/) for metrics collection by 
-[Prometheus](https://grafana.com/oss/prometheus/) & [Grafana](https://grafana.com/) or other monitoring solution 
-when running in kubernetes. Ideally, message rates, error rates, and latency metrics.
-
 ### Unit Test Coverage
 
 Increase the unit test coverage.
@@ -277,3 +323,14 @@ This project is written to fail fast without any re-try logic.
 ### Docker Image Publishing
 
 The docker images need to be tagged and published to a repo. This is not included in the project.
+
+### K8 Helm Chart
+
+Likely the consumer would be deployed to a kubernetes environment. I'd create a [Helm](https://helm.sh/) chart for easy
+deployment and configuration within kubernetes.
+
+### K8 Metrics Endpoint
+
+Include a [flask based endpoint](https://pypi.org/project/prometheus-flask-exporter/) for metrics collection by 
+[Prometheus](https://grafana.com/oss/prometheus/) & [Grafana](https://grafana.com/) or other monitoring solution 
+when running in kubernetes. Ideally, message rates, error rates, and latency metrics.
